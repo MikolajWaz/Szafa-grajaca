@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { isActive } from "../../../lib/supabase";
+import { getSettings } from "../../../lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const active = await isActive();
-  return NextResponse.json({ active }, { headers: { "Cache-Control": "no-store" } });
+  const { active, round } = await getSettings();
+  return NextResponse.json({ active, round }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -14,21 +14,24 @@ export default function Home() {
   const [voted, setVoted] = useState([]);
   const [sending, setSending] = useState("");
   const [active, setActive] = useState(null); // null = jeszcze sprawdzamy
+  const [round, setRound] = useState("0");
 
-  // Czy szafa jest teraz włączona?
+  // Czy szafa jest teraz włączona? Przy okazji sprawdzamy "rundę" głosowania:
+  // po wyczyszczeniu głosów w panelu zaczyna się nowa runda i pamięć ✔ się zeruje.
   useEffect(() => {
     fetch("/api/status", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setActive(d.active === true))
+      .then((d) => {
+        const r = String(d.round || "0");
+        setRound(r);
+        try {
+          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+          if (saved && saved.round === r && Array.isArray(saved.ids)) setVoted(saved.ids);
+          else localStorage.removeItem(STORAGE_KEY);
+        } catch {}
+        setActive(d.active === true);
+      })
       .catch(() => setActive(false));
-  }, []);
-
-  // Zapamiętujemy w przeglądarce, na co ta osoba już głosowała
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      if (Array.isArray(saved)) setVoted(saved);
-    } catch {}
   }, []);
 
   async function search(e) {
@@ -65,7 +68,7 @@ export default function Home() {
       const next = [...voted, item.trackId];
       setVoted(next);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ round, ids: next }));
       } catch {}
     } catch (err) {
       setError(err.message);
