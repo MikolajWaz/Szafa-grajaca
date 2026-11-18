@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "dj-ankieta-zaglosowane";
+const DAY = 24 * 60 * 60 * 1000;
+
+// Ile jeszcze trzeba czekać do kolejnego głosu na ten sam utwór
+function waitText(ms) {
+  const mins = Math.max(1, Math.ceil(ms / 60000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `za ${h} h ${m} min` : `za ${m} min`;
+}
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -11,10 +20,17 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
-  const [voted, setVoted] = useState([]);
+  const [voted, setVoted] = useState({}); // { idUtworu: godzinaOstatniegoGłosu }
+  const [now, setNow] = useState(Date.now());
   const [sending, setSending] = useState("");
   const [active, setActive] = useState(null); // null = jeszcze sprawdzamy
   const [round, setRound] = useState("0");
+
+  // Co minutę odświeżamy odliczanie
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   // Czy szafa jest teraz włączona? Przy okazji sprawdzamy "rundę" głosowania:
   // po wyczyszczeniu głosów w panelu zaczyna się nowa runda i pamięć ✔ się zeruje.
@@ -26,7 +42,15 @@ export default function Home() {
         setRound(r);
         try {
           const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-          if (saved && saved.round === r && Array.isArray(saved.ids)) setVoted(saved.ids);
+          if (saved && saved.round === r && saved.votes && typeof saved.votes === "object") {
+            setVoted(saved.votes);
+          } else if (saved && saved.round === r && Array.isArray(saved.ids)) {
+            // starszy zapis: uznajemy, że głos oddano przed chwilą
+            const t = Date.now();
+            const migrated = {};
+            for (const id of saved.ids) migrated[id] = t;
+            setVoted(migrated);
+          }
           else localStorage.removeItem(STORAGE_KEY);
         } catch {}
         setActive(d.active === true);
@@ -65,10 +89,11 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Nie udało się zagłosować.");
-      const next = [...voted, item.trackId];
+      const next = { ...voted, [item.trackId]: Date.now() };
       setVoted(next);
+      setNow(Date.now());
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ round, ids: next }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ round, votes: next }));
       } catch {}
     } catch (err) {
       setError(err.message);
@@ -153,7 +178,8 @@ export default function Home() {
 
           <ul className="mt-5 space-y-3">
             {results.map((r, i) => {
-              const done = voted.includes(r.trackId);
+              const left = voted[r.trackId] ? voted[r.trackId] + DAY - now : 0;
+              const done = left > 0;
               const busy = sending === r.trackId;
               return (
                 <li key={r.trackId} className="slot" style={{ animationDelay: i * 40 + "ms" }}>
@@ -172,6 +198,11 @@ export default function Home() {
                       )}
                     </p>
                     <p className="truncate text-sm text-amber-900/80">{r.artist}</p>
+                    {done && (
+                      <p className="text-xs font-semibold text-green-800">
+                        Kolejny głos {waitText(left)}
+                      </p>
+                    )}
                     {r.url && (
                       <a
                         href={r.url}
@@ -188,7 +219,7 @@ export default function Home() {
                     disabled={done || busy}
                     className={"chrome-btn flex-none text-sm " + (done ? "done" : "pink")}
                   >
-                    {done ? "✔ Jest" : busy ? "…" : "Zagłosuj"}
+                    {done ? "✔ Jest" : busy ? "…" : voted[r.trackId] ? "Zagłosuj ponownie" : "Zagłosuj"}
                   </button>
                 </li>
               );
